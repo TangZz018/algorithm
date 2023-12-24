@@ -1,0 +1,9 @@
+﻿  Clt.cpp
+C:\Users\Duoluomidi\Desktop\算法\实验三\Winsock_Client_Server_TCP\algorithm\projekt_klient_TCP\Clt.cpp(110,60): warning C4267: “参数”: 从“size_t”转换到“int”，可能丢失数据
+C:\Users\Duoluomidi\Desktop\算法\实验三\Winsock_Client_Server_TCP\algorithm\projekt_klient_TCP\Clt.cpp(59,31): warning C4101: “time_consumed2”: 未引用的局部变量
+  正在生成代码
+  94 of 99 functions (94.9%) were compiled, the rest were copied from previous compilation.
+    0 functions were new in current compilation
+    1 functions had inline decision re-evaluated but remain unchanged
+  已完成代码的生成
+  projekt_klient_TCP.vcxproj -> C:\Users\Duoluomidi\Desktop\算法\实验三\Winsock_Client_Server_TCP\algorithm\x64\Release\projekt_klient_TCP.exe
