@@ -2,7 +2,7 @@
 #include <cmath>
 #include <omp.h>
 #include <windows.h>
-#include "immintrin.h"
+#include <immintrin.h>
 #include "methods.h"
 
 //未加速版本
@@ -51,9 +51,9 @@ void merge(float arr[], int left, int mid, int right) {
 	int tempSize = right - left + 1;
 	float* temp = new float[tempSize];
 
-	// 从小到大排序
+	// 从大到小排序
 	for (int p = 0; p < tempSize; p++) {
-		if (i <= mid && (j > right || arr[i] <= arr[j])) {
+		if (i <= mid && (j > right || arr[i] >= arr[j])) {
 			temp[p] = arr[i];
 			i++;
 		}
@@ -179,9 +179,13 @@ void mergeResults(float result[], int chunkSize, int threadCount) {
 	delete[] merged;
 }
 
-void sortSpeedUp(const float data[], const int len, float result[]) {
-	for (int i = 0; i < len; i++) {
-		result[i] = log(sqrt(data[i]));
+
+void sortSpeedUpManual(const float data[], const int len, float result[]) {
+#pragma omp parallel for
+	for (int i = 0; i < len; i += 8) {
+		// result[i] = log(sqrt(data[i]));
+		__m256 temp = _mm256_log_ps(_mm256_sqrt_ps(_mm256_load_ps(&data[i])));
+		_mm256_store_ps(&result[i], temp);
 	}
 
 	int chunkSize = len / MAX_THREADS;
@@ -189,7 +193,7 @@ void sortSpeedUp(const float data[], const int len, float result[]) {
 	HANDLE hThreads[MAX_THREADS];
 
 	for (int i = 0; i < MAX_THREADS; i++) {
-		thread_data[i].data = const_cast<float*>(&data[len / MAX_THREADS * i]);
+		thread_data[i].data = const_cast<float*>(&result[chunkSize * i]);
 		thread_data[i].len = chunkSize;
 		thread_data[i].max = 0;
 
@@ -205,7 +209,7 @@ void sortSpeedUp(const float data[], const int len, float result[]) {
 	}
 
 	WaitForMultipleObjects(MAX_THREADS, hThreads, TRUE, INFINITE);
-
+#pragma omp parallel for
 	for (int i = 0; i < MAX_THREADS; i++) {
 		CloseHandle(hThreads[i]);
 	}
@@ -213,6 +217,7 @@ void sortSpeedUp(const float data[], const int len, float result[]) {
 	// 汇总各线程的排序结果
 	mergeResults(result, chunkSize, MAX_THREADS);
 }
+
 
 // 求sse256寄存器中8个数的最大值
 float horizontal_max(__m256 max_sse) {
@@ -225,6 +230,15 @@ float horizontal_max(__m256 max_sse) {
 		}
 	}
 	return max1;
+}
+
+// 求sse256寄存器中8个数的和
+float horizontal_sum(__m256 sum_sse) {
+	float sum8[8];
+	float sum1 = 0;
+	_mm256_store_ps(sum8, sum_sse);
+	for (int i = 0; i < 8; i++) sum1 += sum8[i];
+	return sum1;
 }
 
 DWORD WINAPI maxSpeedUpThread(LPVOID lpParameter) {
@@ -270,15 +284,6 @@ float maxSpeedUpManual(float data[], const int len) {
 	return max;
 }
 
-// 求sse256寄存器中8个数的和
-float horizontal_sum(__m256 sum_sse) {
-	float sum8[8];
-	float sum1 = 0;
-	_mm256_store_ps(sum8, sum_sse);
-	for (int i = 0; i < 8; i++) sum1 += sum8[i];
-	return sum1;
-}
-
 DWORD WINAPI sumSpeedUpThread(LPVOID lpParameter) {
 	ThreadData* thread_data = static_cast<ThreadData*>(lpParameter);
 
@@ -312,26 +317,6 @@ DWORD WINAPI sumSpeedUpThread(LPVOID lpParameter) {
 	thread_data->sum = sum_horizontal;
 	return 0;
 }
-/*
-DWORD WINAPI sumSpeedUpThread(LPVOID lpParameter) {
-	ThreadData* thread_data = static_cast<ThreadData*>(lpParameter);
-	const float* data = thread_data->data;
-	int len = thread_data->len;
-
-	float sum = 0.0f;
-	float c = 0.0f;
-
-	for (int i = 0; i < len; i++) {
-		float y = log(sqrt(data[i])) - c;  // 计算 y，减去运行补偿。
-		float t = sum + y;                  // 计算中间和。
-		c = (t - sum) - y;                  // 更新运行补偿。
-		sum = t;   // 更新累加器。
-	}
-
-	thread_data->sum = sum;
-	return 0;
-}
-*/
 
 float sumSpeedUpManual(float data[], const int len) {
 	HANDLE hThreads[MAX_THREADS];
@@ -348,6 +333,7 @@ float sumSpeedUpManual(float data[], const int len) {
 				0,  // use default creation flags.0 means the thread will
 				// be run at once  CREATE_SUSPENDED
 				NULL);
+		ResumeThread(hThreads[i]);
 	}
 
 	WaitForMultipleObjects(MAX_THREADS, hThreads, TRUE, INFINITE);
@@ -359,16 +345,101 @@ float sumSpeedUpManual(float data[], const int len) {
 	return sum;
 }
 
+// 测试排序结果是否正确(从小到大)
 void test(float result[], const int len)
 {
 	for (int i = 0; i < len - 1; i++)
 	{
-		if (result[i] > result[i + 1])
+		if (result[i] < result[i + 1])
 		{
-			std::cout << "错误" << std::endl;
+			std::cout << "排序结果错误" << std::endl;
 			return;
 		}
 	}
-	std::cout << "正确" << std::endl;
+	std::cout << "排序结果正确" << std::endl;
 	return;
+}
+
+void display(const float data[], const int len)
+{
+	for (int i = 0; i < len; i++)
+	{
+		std::cout << data[i] << '\t';
+	}
+}
+
+
+
+// 下面是双调排序的实现函数
+
+// 由bitonicSort中的顺序可知，这里传入的arr已是双调序列
+void bitonicMerge(float* data, int len, bool asd) {
+	if (len > 1) {
+		int m = len / 2;
+		for (int i = 0; i < m; ++i) {
+			if (data[i] > data[i + m])
+				std::swap(data[i], data[i + m]); // 根据asd判断是否交换
+		}
+		// for循环结束后又生成了2个双调序列，分别merge直到序列长度为1
+		bitonicMerge(data, m, asd); // 都是按照asd进行merge
+		bitonicMerge(data + m, m, asd);
+	}
+}
+
+void bitonicSort(float* arr, int len, bool asd) { // asd 升序
+	if (len > 1) {
+		int m = len / 2;
+		bitonicSort(arr, m, !asd); // 前半降序
+		bitonicSort(arr + m, len - m, asd); // 后半升序
+		// 前2个sort之后形成了1个双调序列，然后传入merge合并成asd规定的序列
+		bitonicMerge(arr, len, asd); // 合并
+	}
+}
+
+
+void bitonicMergeOMP(float* arr, int len, bool asd) {
+	if (len > 1) {
+		int m = len / 2;
+#pragma omp parallel for
+		for (int i = 0; i < m; ++i) {
+			if (arr[i] > arr[i + m])
+				std::swap(arr[i], arr[i + m]);
+		}
+#pragma omp task
+		bitonicMergeOMP(arr, m, asd);
+#pragma omp task
+		bitonicMergeOMP(arr + m, m, asd);
+#pragma omp taskwait
+	}
+}
+
+void bitonicSortOMP(float* arr, int len, bool asd) {
+	if (len > 1) {
+		int m = len / 2;
+#pragma omp parallel
+#pragma omp single nowait
+		{
+#pragma omp task
+			bitonicSortOMP(arr, m, !asd);
+#pragma omp task
+			bitonicSortOMP(arr + m, len - m, asd);
+		}
+		bitonicMergeOMP(arr, len, asd);
+	}
+}
+
+/*
+void floatSort(const float data[], float result[], const int len) {
+	for (int i = 0; i < len; i++) {
+		result[i] = log(sqrt(data[i]));
+	}
+	bitonicSort(result, DATANUM, false);
+}
+*/
+
+void sortSpeedUp(const float data[], float result[], const int len) {
+	for (int i = 0; i < len; i++) {
+		result[i] = log(sqrt(data[i]));
+	}
+	bitonicSortOMP(result, DATANUM, false);
 }
