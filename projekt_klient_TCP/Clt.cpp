@@ -30,8 +30,8 @@ SOCKET web_init()
     SOCKADDR_IN addr;
     int sizeofaddr = sizeof(addr);
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = inet_addr("192.168.43.250");
-    //addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    //addr.sin_addr.s_addr = inet_addr("192.168.43.250");
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
     addr.sin_port = htons(8083);
 
     // 连接到服务器

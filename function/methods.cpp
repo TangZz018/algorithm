@@ -48,7 +48,7 @@ void mergeOfTwo(float arr1[], float arr2[], float merged[], const int len) {
 	int i = 0, j = 0, k = 0;
 
 	while (i < len && j < len) {
-		if (arr1[i] <= arr2[j]) {
+		if (arr1[i] >= arr2[j]) {  // 修改这里的比较条件
 			merged[k] = arr1[i];
 			i++;
 		}
