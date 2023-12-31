@@ -1,92 +1,18 @@
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
-#include <omp.h>
-#include <windows.h>
-#include "immintrin.h" // avx
+
 #pragma comment(lib,"ws2_32.lib")
 //#include <WinSock2.h>
 #include <iostream>
-#include <string>
+#include <cmath>
+#include <omp.h>
+#include <windows.h>
+#include "immintrin.h"
+#include "methods.h"
 
-#define MAX_THREADS 64
-#define SUBDATANUM 2000000
-#define DATANUM (SUBDATANUM * MAX_THREADS)   
-
-// 不加速版本
-
-// 加速版本
-float floatSum(const float data[], const int len) //data是原始数据，len为长度。结果通过函数返回
+using namespace std;
+SOCKET web_init()
 {
-	float sum = 0.0;   // 准备累加器。
-	float c = 0.0;     // 用于追踪低位丢失的比特的运行补偿。
-
-	for (int i = 0; i < len; i++) {
-		float y = log(sqrt(data[i])) - c;  // 计算 y，减去运行补偿。
-		float t = sum + y;                  // 计算中间和。
-		c = (t - sum) - y;                  // 更新运行补偿。
-		sum = t;   // 更新累加器。
-
-	}
-	//for (int i = 0; i < len; i++) // 数据初始化
-	//{
-	//    sum += 1.556f;
-	//}
-	return sum;
-}
-
-float sumSpeedUp1(const float data[], const int len) {
-	//assert(len % 8 == 0 && "要求N为8的倍数");
-	if (len % 8)
-		std::cout << "要求N为8的倍数" << std::endl;
-
-	float result = 0;
-	int per_iter = len / 8;
-
-	__m256 sum = _mm256_setzero_ps();
-	__m256 c = _mm256_setzero_ps();
-	__m256* ptr = (__m256*)data;
-
-
-#pragma omp parallel for
-	for (int i = 0; i < per_iter; ++i) {
-		// 计算 y，减去运行补偿。
-		__m256 right = _mm256_log_ps(_mm256_sqrt_ps(ptr[i]));
-		__m256 y = _mm256_sub_ps(right, c);
-
-		// 计算中间和。
-		__m256 t = _mm256_add_ps(sum, y);
-
-		// 更新运行补偿。
-		c = _mm256_sub_ps(_mm256_sub_ps(t, sum), y);
-#pragma omp critical
-		// 更新累加器。
-		sum = t;
-	}
-
-	float* resultArray = (float*)&sum;
-	result = resultArray[0] + resultArray[1] + resultArray[2] + resultArray[3] +
-		resultArray[4] + resultArray[5] + resultArray[6] + resultArray[7];
-	return result;
-
-}
-
-
-int main() {
-	float sum1 = 0, sum2 = 0;
-	float max1 = 0, max2 = 0;
-	LARGE_INTEGER start, end;
-	float* result = new float[DATANUM];
-	float* rawFloatData = new float[DATANUM];
-	float* floatSorts = new float[DATANUM];
-
-	long long time_consumed1, time_consumed2;
-
-	for (size_t i = 0; i < DATANUM; i++)
-	{
-		*(rawFloatData + i) = float(i + 1);
-		*(result + i) = 0;
-		*(floatSorts + i) = 0;
-	}
 	//网络连接
 	WSAData wsaData;
 	WORD DllVersion = MAKEWORD(2, 1);
@@ -98,7 +24,7 @@ int main() {
 	SOCKADDR_IN addr;
 	int addrlen = sizeof(addr);
 	addr.sin_family = AF_INET;
-	addr.sin_port = htons(8081);
+	addr.sin_port = htons(8083);
 	addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 	//addr.sin_addr.s_addr = inet_addr("192.168.43.250");
 
@@ -107,89 +33,153 @@ int main() {
 	bind(sListen, (SOCKADDR*)&addr, sizeof(addr));
 
 	listen(sListen, SOMAXCONN);
-
-	char L1;
-	float L3;
-
 	SOCKET newConnection;
+	std::cout << "等待连接" << std::endl;
 	newConnection = accept(sListen, (SOCKADDR*)&addr, &addrlen);
-	//结束网络连接
+	return newConnection;
+}
 
-	//开始测速
-	QueryPerformanceCounter(&start);
-	sum1 = sumSpeedUp1(rawFloatData, DATANUM/2);
-	if (newConnection == 0) {
-		std::cout << "Bad connection." << std::endl;
+void mergeOfTwo(float arr1[], float arr2[], float merged[], const int len);
+
+int main() {
+	float sum1 = 0, sum2 = 0;
+	float max1 = 0, max2 = 0;
+	LARGE_INTEGER start, end;
+	float* result = new float[DATANUM/2];
+	float* rawFloatData = new float[DATANUM/2];
+	float* floatSorts = new float[DATANUM/2];
+	float* finalresult= new float[DATANUM];
+
+	long long time_consumed1, time_consumed2;
+	long long time_max_consumed1, time_max_consumed2;
+	for (size_t i = 0; i < DATANUM/2; i++)
+	{
+		*(rawFloatData + i) = float(i + 1);
+		*(result + i) = 0;
+		*(floatSorts + i) = 0;
+
 	}
-	else {
-		std::string strData;
-		L1 = '1';
+	for (size_t i = 0; i < DATANUM; i++)
+	{
+		
+		*(finalresult + i) = 0;
+	}
+	SOCKET Coonection;
+	Coonection = web_init();
+	float hResult = 0.0f;
+	QueryPerformanceCounter(&start);
 
-		while (L1 != '0') {
-			std::cout << "Waiting for string from client..." << std::endl;
+	sum1 = sumSpeedUpManual(rawFloatData, DATANUM / 2);
 
-			// 接收字符串
-			char buffer[50];
-			int bytesReceived = recv(newConnection, (char*)buffer, sizeof(buffer), 0);
-			std::cout << buffer << std::endl;
-			if (bytesReceived > 0) {
-				buffer[bytesReceived] = '\0';  // 确保字符串以 null 结尾
-				strData = buffer;
+	if (Coonection == 0) {
+		std::cout << "网络连接失败" << std::endl;
+		return -1;
+	}
 
-				std::cout << "Received string from client: " << strData << std::endl;
+		while (true) {
 
-				try {
-					// 尝试将字符串转换为 double
-					L3 = std::stof(strData);
-
-					// 打印转换后的 double 值
-					std::cout << "Converted double value: " << L3 << std::endl;
-				}
-				catch (const std::invalid_argument&) {
-					std::cerr << "Invalid double value received from client." << std::endl;
-				}
-				catch (const std::out_of_range&) {
-					std::cerr << "Double value out of range." << std::endl;
-				}
-			}
-
-			if (L3 > 0) {
-				L1 = '1';
-				send(newConnection, (char*)&L1, sizeof(L1), NULL);
+			if (SOCKET_ERROR == recv(Coonection, (char*)&hResult, sizeof(hResult), NULL))
+				return WSAGetLastError();
+			else
 				break;
-			}
+
 
 		}
-    }
-	float final_result = L3 + sum1;
-	//return 0;
+		
+		
 
-	//max1 = find_max(rawFloatData, DATANUM);
-	//floatSort(rawFloatData, result, DATANUM);
+	float final_result_sum = hResult + sum1;
+
 	QueryPerformanceCounter(&end);
-	//销毁网络连接
-	closesocket(newConnection);
-	closesocket(sListen);
-	WSACleanup();
-	//for (int i = 0; i < 10; i++)
-	//{
-	//	std::cout << result[i] << '\t';
-	//}
-	//std::cout << std::endl;
-
+	//开始测速
 	std::cout << "Time Consumed 1 : " << (end.QuadPart - start.QuadPart) << std::endl;
 	time_consumed1 = end.QuadPart - start.QuadPart;
-	std::cout << "输出求和结果 : " << final_result << std::endl;
-
+	std::cout << "输出求和结果 : " << final_result_sum << std::endl;
 	QueryPerformanceCounter(&start);
-	sum2 = floatSum(rawFloatData, DATANUM);
+
+	max1 = maxSpeedUpManual(rawFloatData, DATANUM / 2);
+	if (Coonection == 0) {
+		std::cout << "网络连接失败" << std::endl;
+		return -1;
+	}
+
+		
+		while (true) {
+
+			if (SOCKET_ERROR == recv(Coonection, (char*)&max2, sizeof(max2), NULL))
+				return WSAGetLastError();
+			else
+				break;
+		}
+
+	float final_result = (max1 > max2) ? max1 : max2;
+
 	QueryPerformanceCounter(&end);
-	std::cout << "Time Consumed 2 : " << (end.QuadPart - start.QuadPart) << std::endl;
+	//销毁网络连接
+	QueryPerformanceCounter(&start);
+	sortSpeedUpManual(rawFloatData, DATANUM / 2, result);
+	const int CHUNK_SIZE = 1024;  // 每个块的大小为 1024 字节
+
+	int totalBytesReceived = 0;
+	if (Coonection == 0) {
+		std::cout << "网络连接失败" << std::endl;
+		return -1;
+	}
+
+	int i = 0;
+	while (totalBytesReceived < DATANUM / 2 * sizeof(float)) {
+		int remainingBytes = DATANUM / 2 * sizeof(float) - totalBytesReceived;
+		int chunkSize = min(CHUNK_SIZE, remainingBytes);
+
+		// 接收数据
+		int bytesReceived = recv(Coonection, (char*)&result[totalBytesReceived / sizeof(float)], chunkSize, NULL);
+
+		if (bytesReceived <= 0) {
+			// 处理接收错误或连接关闭的情况
+			break;
+		}
+
+		totalBytesReceived += bytesReceived;
+	}
+
+	floatSorts = (float*)result;
+
+	mergeOfTwo(result, floatSorts, finalresult, DATANUM);
+	QueryPerformanceCounter(&end);
+	long long speed_sort_time = end.QuadPart - start.QuadPart;
+	//std::cout << "传输耗时的计算时间为“”“”“：：：：：：：：：：" << (end.QuadPart - start.QuadPart) << std::endl;
+
+	closesocket(Coonection);;
+	WSACleanup();
+
+	time_max_consumed1 = end.QuadPart - start.QuadPart;
+
+
+
+
+	/**********************************************************************************************************/
+	QueryPerformanceCounter(&start);
+	sum2 = sum(rawFloatData, DATANUM);
+	QueryPerformanceCounter(&end);
+
+	std::cout << "Time add Consumed 2 : " << (end.QuadPart - start.QuadPart) << std::endl;
 	time_consumed2 = end.QuadPart - start.QuadPart;
 	std::cout << "输出求和结果 : " << sum2 << std::endl;
 	std::cout << "加速比" << (float)time_consumed2 / time_consumed1 << std::endl;
+
+
+	std::cout << "/************************************************************" << std::endl;
+	QueryPerformanceCounter(&start);
+	max1 = floatMax(rawFloatData, DATANUM);
+	QueryPerformanceCounter(&end);
+	std::cout << "Time Consumed 1 : " << time_max_consumed1 << std::endl;
+	std::cout << "输出结果 : " << final_result << std::endl;
+	std::cout << "Time max Consumed 2 : " << (end.QuadPart - start.QuadPart) << std::endl;
+	time_max_consumed2 = end.QuadPart - start.QuadPart;
+	std::cout << "最大值 : " << max1 << std::endl;
+	std::cout << "加速比" << (float)time_max_consumed2 / time_max_consumed1 << std::endl;
 	delete[] rawFloatData, result, floatSorts;
 	std::cout << "Press Enter to exit...";
 	std::cin.get();  // 等待用户按下 Enter 键
-    return 0;
+	return 0;
 }
